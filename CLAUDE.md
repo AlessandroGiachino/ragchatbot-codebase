@@ -1,8 +1,11 @@
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Development Commands
+
+**IMPORTANT**: This project uses `uv` as the package manager and Python runner. NEVER use `pip` directly. Always prefix Python commands with `uv run`.
 
 ### Running the Application
 ```bash
@@ -28,13 +31,24 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ```
 
 ### Python Execution
-Always use `uv` for running Python files and commands:
+**CRITICAL**: Always use `uv` for ALL Python operations. Never use `pip`, `python`, `pytest`, or any Python command directly.
 ```bash
 # Run Python scripts
 uv run python script.py
 
 # Run any Python command
 uv run command_name
+
+# Run tests
+uv run pytest
+
+# Run the server
+uv run uvicorn app:app --reload --port 8000
+
+# WRONG - Never do this:
+# pip install package
+# python script.py
+# pytest
 ```
 
 ### Code Quality Tools
