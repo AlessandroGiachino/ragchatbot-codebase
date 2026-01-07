@@ -2,6 +2,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 from ai_generator import AIGenerator
+from ai_providers import create_ai_provider
 from document_processor import DocumentProcessor
 from models import Course, CourseChunk, Lesson
 from search_tools import CourseOutlineTool, CourseSearchTool, ToolManager
@@ -22,9 +23,17 @@ class RAGSystem:
         self.vector_store = VectorStore(
             config.CHROMA_PATH, config.EMBEDDING_MODEL, config.MAX_RESULTS
         )
-        self.ai_generator = AIGenerator(
-            config.ANTHROPIC_API_KEY, config.ANTHROPIC_MODEL
-        )
+
+        # Create AI provider based on configuration
+        if config.AI_PROVIDER.lower() == "openai":
+            api_key = config.OPENAI_API_KEY
+            model = config.OPENAI_MODEL
+        else:
+            api_key = config.ANTHROPIC_API_KEY
+            model = config.ANTHROPIC_MODEL
+
+        provider = create_ai_provider(config.AI_PROVIDER, api_key, model)
+        self.ai_generator = AIGenerator(provider)
         self.session_manager = SessionManager(config.MAX_HISTORY)
 
         # Initialize search tools

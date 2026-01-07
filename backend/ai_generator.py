@@ -1,10 +1,10 @@
 from typing import Any, Dict, List, Optional
 
-import anthropic
+from ai_providers import AIProviderBase
 
 
 class AIGenerator:
-    """Handles interactions with Anthropic's Claude API for generating responses"""
+    """Handles interactions with AI providers (Anthropic Claude or OpenAI) for generating responses"""
 
     # Static system prompt to avoid rebuilding on each call
     SYSTEM_PROMPT = """ You are an AI assistant specialized in course materials and educational content with access to search tools for course information.
@@ -43,12 +43,8 @@ All responses must be:
 Provide only the direct answer to what was asked.
 """
 
-    def __init__(self, api_key: str, model: str):
-        self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = model
-
-        # Pre-build base API parameters
-        self.base_params = {"model": self.model, "temperature": 0, "max_tokens": 800}
+    def __init__(self, provider: AIProviderBase):
+        self.provider = provider
 
     def generate_response(
         self,
@@ -83,41 +79,33 @@ Provide only the direct answer to what was asked.
 
         # Execute up to 2 rounds of tool calling
         for round_num in range(2):
-            # Prepare API call parameters
-            api_params = {
-                **self.base_params,
-                "messages": messages,
-                "system": system_content,
-            }
-
-            # Add tools if available
-            if tools:
-                api_params["tools"] = tools
-                api_params["tool_choice"] = {"type": "auto"}
-
-            # Get response from Claude
-            response = self.client.messages.create(**api_params)
+            # Get response from the AI provider
+            response_text, has_tool_calls, raw_response = (
+                self.provider.generate_response(
+                    messages=messages,
+                    system_prompt=system_content,
+                    tools=tools,
+                )
+            )
 
             # Handle tool execution if needed
-            if response.stop_reason == "tool_use" and tool_manager:
+            if has_tool_calls and tool_manager:
                 messages, should_continue = self._handle_tool_execution(
-                    response, messages, tool_manager
+                    raw_response, messages, tool_manager
                 )
                 if not should_continue:
                     break
             else:
                 # No tool use, return direct response
-                return response.content[0].text
+                return response_text
 
         # After max rounds, make final call without tools to get response
-        final_params = {
-            **self.base_params,
-            "messages": messages,
-            "system": system_content,
-        }
-
-        final_response = self.client.messages.create(**final_params)
-        return final_response.content[0].text
+        final_text, _, _ = self.provider.generate_response(
+            messages=messages,
+            system_prompt=system_content,
+            tools=None,
+        )
+        return final_text
 
     def _handle_tool_execution(self, initial_response, messages: List, tool_manager):
         """
@@ -131,42 +119,59 @@ Provide only the direct answer to what was asked.
         Returns:
             Tuple of (updated_messages, should_continue)
         """
-        # Add AI's tool use response
-        messages.append({"role": "assistant", "content": initial_response.content})
+        # Extract tool calls using provider-specific method
+        tool_calls = self.provider.extract_tool_calls(initial_response)
 
         # Execute all tool calls and collect results
         tool_results = []
-        for content_block in initial_response.content:
-            if content_block.type == "tool_use":
-                try:
-                    tool_result = tool_manager.execute_tool(
-                        content_block.name, **content_block.input
-                    )
+        for tool_call in tool_calls:
+            try:
+                tool_result = tool_manager.execute_tool(
+                    tool_call["name"], **tool_call["input"]
+                )
 
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": content_block.id,
-                            "content": tool_result,
-                        }
-                    )
-                except Exception as e:
-                    # Tool execution failed, stop rounds
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": content_block.id,
-                            "content": f"Error: Tool execution failed - {str(e)}",
-                        }
-                    )
-                    # Add tool results and signal to stop
-                    if tool_results:
-                        messages.append({"role": "user", "content": tool_results})
-                    return messages, False
+                tool_results.append(
+                    {
+                        "id": tool_call["id"],
+                        "name": tool_call["name"],
+                        "result": tool_result,
+                    }
+                )
+            except Exception as e:
+                # Tool execution failed, stop rounds
+                tool_results.append(
+                    {
+                        "id": tool_call["id"],
+                        "name": tool_call["name"],
+                        "result": f"Error: Tool execution failed - {str(e)}",
+                    }
+                )
+                # Format and add tool results, then signal to stop
+                formatted = self.provider.format_tool_results(
+                    tool_results, initial_response
+                )
+                self._append_formatted_results(messages, formatted)
+                return messages, False
 
-        # Add tool results as single message
-        if tool_results:
-            messages.append({"role": "user", "content": tool_results})
+        # Format tool results in provider-specific format
+        formatted = self.provider.format_tool_results(tool_results, initial_response)
+        self._append_formatted_results(messages, formatted)
 
         # Continue with next round
         return messages, True
+
+    def _append_formatted_results(self, messages: List, formatted: Dict[str, Any]):
+        """Append formatted tool results to messages based on provider format"""
+        if "assistant_content" in formatted:
+            assistant_content = formatted["assistant_content"]
+            # Check if it's already a complete message dict (OpenAI format)
+            if isinstance(assistant_content, dict) and "role" in assistant_content:
+                messages.append(assistant_content)
+            else:
+                # It's just content, wrap it in a message (Anthropic format)
+                messages.append({"role": "assistant", "content": assistant_content})
+        if "user_content" in formatted:
+            messages.append({"role": "user", "content": formatted["user_content"]})
+        if "tool_messages" in formatted:
+            for tool_msg in formatted["tool_messages"]:
+                messages.append(tool_msg)

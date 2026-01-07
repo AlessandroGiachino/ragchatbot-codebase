@@ -26,8 +26,14 @@ uv sync
 uv add package_name
 
 # Environment variables required
-# Create .env file with:
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# Copy .env.example to .env and configure:
+cp .env.example .env
+
+# Required variables:
+# AI_PROVIDER=anthropic  # or "openai"
+# ANTHROPIC_API_KEY=your_anthropic_api_key_here  # if using Anthropic
+# OPENAI_API_KEY=your_openai_api_key_here  # if using OpenAI
+# OPENAI_MODEL=gpt-3.5-turbo  # optional, defaults to gpt-3.5-turbo
 ```
 
 ### Python Execution
@@ -107,10 +113,12 @@ This is a Retrieval-Augmented Generation (RAG) system for course materials with 
   - Metadata: course_title, lesson_number, chunk_index
 - Supports filtered search by course name and lesson number
 
-**AIGenerator (backend/ai_generator.py)**: Anthropic Claude API integration
-- Uses claude-sonnet-4-20250514 model
-- Implements tool calling for search functionality
+**AIGenerator (backend/ai_generator.py)**: Multi-provider AI integration (Anthropic Claude or OpenAI)
+- Supports both Anthropic (claude-sonnet-4-20250514) and OpenAI (gpt-3.5-turbo, gpt-4, etc.)
+- Provider selection via AI_PROVIDER environment variable
+- Implements tool calling for search functionality across both providers
 - Maintains conversation history via SessionManager
+- Uses provider abstraction (backend/ai_providers.py) for unified interface
 
 **Search Tools (backend/search_tools.py)**: Tool-based search system
 - CourseSearchTool: Semantic search across course content with intelligent course name resolution
